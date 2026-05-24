@@ -244,9 +244,10 @@ impl Packed<ImageElem> {
 
                 // Identify the SVG file in case contained hrefs need to be resolved.
                 let svg_file = match &self.source.source {
-                    DataSource::Path(path) => {
+                    DataSource::FilePath(path) => {
                         path.resolve_if_some(span.id()).ok().map(|v| v.intern())
                     }
+                    DataSource::DirectoryPath(_) => None,
                     DataSource::Bytes(_) => span.id(),
                 };
                 ImageKind::Svg(
@@ -334,7 +335,7 @@ impl Packed<ImageElem> {
         };
 
         let Derived { source, derived: loaded } = &self.source;
-        if let DataSource::Path(path) = source
+        if let DataSource::FilePath(path) = source
             && let Ok(id) = path.resolve_if_some(self.span().id())
             && let Some(format) = determine_format_from_path(id.vpath())
         {

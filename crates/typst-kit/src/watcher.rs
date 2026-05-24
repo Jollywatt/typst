@@ -97,8 +97,13 @@ impl Watcher {
 
             // Watch the path if it's not already watched.
             if !self.watched.contains_key(&path) {
+                let mode = if path.is_dir() {
+                    RecursiveMode::Recursive
+                } else {
+                    RecursiveMode::NonRecursive
+                };
                 self.watcher
-                    .watch(&path, RecursiveMode::NonRecursive)
+                    .watch(&path, mode)
                     .map_err(|err| eco_format!("failed to watch {path:?} ({err})"))?;
             }
 

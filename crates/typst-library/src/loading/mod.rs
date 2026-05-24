@@ -8,6 +8,8 @@ mod csv_;
 mod json_;
 #[path = "read.rs"]
 mod read_;
+#[path = "readdir.rs"]
+mod readdir_;
 #[path = "toml.rs"]
 mod toml_;
 #[path = "xml.rs"]
@@ -19,6 +21,7 @@ pub use self::cbor_::*;
 pub use self::csv_::*;
 pub use self::json_::*;
 pub use self::read_::*;
+pub use self::readdir_::*;
 pub use self::toml_::*;
 pub use self::xml_::*;
 pub use self::yaml_::*;
@@ -27,13 +30,14 @@ use comemo::Tracked;
 use typst_syntax::{FileId, Spanned};
 
 use crate::World;
-use crate::diag::{At, HintedString, SourceResult};
+use crate::diag::{At, HintedString, SourceResult, bail};
 use crate::foundations::{Bytes, OneOrMultiple, PathOrStr, Scope, Str, cast};
 
 /// Hook up all `data-loading` definitions.
 pub(super) fn define(global: &mut Scope) {
     global.start_category(crate::Category::DataLoading);
     global.define_func::<read>();
+    global.define_func::<readdir>();
     global.define_func::<csv>();
     global.define_func::<json>();
     global.define_func::<toml>();
@@ -47,7 +51,9 @@ pub(super) fn define(global: &mut Scope) {
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub enum DataSource {
     /// A path to a file.
-    Path(PathOrStr),
+    FilePath(PathOrStr),
+    /// A path to a directory.
+    DirectoryPath(PathOrStr),
     /// Raw bytes.
     Bytes(Bytes),
 }
@@ -55,10 +61,11 @@ pub enum DataSource {
 cast! {
     DataSource,
     self => match self {
-        Self::Path(v) => v.into_value(),
+        Self::FilePath(v) => v.into_value(),
+        Self::DirectoryPath(v) => v.into_value(),
         Self::Bytes(v) => v.into_value(),
     },
-    v: PathOrStr => Self::Path(v),
+    v: PathOrStr => Self::FilePath(v),
     v: Bytes => Self::Bytes(v),
 }
 
@@ -84,7 +91,7 @@ impl Load for Spanned<&DataSource> {
 
     fn load(&self, world: Tracked<dyn World + '_>) -> SourceResult<Self::Output> {
         match self.v {
-            DataSource::Path(path) => {
+            DataSource::FilePath(path) => {
                 let resolved =
                     path.resolve_if_some(self.span.id()).at(self.span)?.intern();
                 let data = world
@@ -102,6 +109,9 @@ impl Load for Spanned<&DataSource> {
                     .at(self.span)?;
                 let source = Spanned::new(LoadSource::Path(resolved), self.span);
                 Ok(Loaded::new(source, data))
+            }
+            DataSource::DirectoryPath(_) => {
+                bail!(self.span, "expected a file path, found a directory path")
             }
             DataSource::Bytes(data) => {
                 let source = Spanned::new(LoadSource::Bytes, self.span);

@@ -103,6 +103,39 @@ impl World for TestWorld {
         }
     }
 
+    fn dir(&self, id: FileId) -> FileResult<Vec<VirtualPath>> {
+        let dir = id.vpath();
+        let mut entries = Vec::new();
+        let mut exists = dir.is_root();
+
+        let mut visit = |file_id: FileId| {
+            let path = file_id.vpath();
+            if let Some(parent) = path.parent() {
+                if parent == *dir {
+                    entries.push(path.clone());
+                }
+                if path.get_with_slash().starts_with(dir.get_with_slash()) {
+                    exists = true;
+                }
+            }
+        };
+
+        visit(self.main.id());
+        for id in self.files.sources.keys().copied() {
+            visit(id);
+        }
+        for id in self.files.assets.keys().copied() {
+            visit(id);
+        }
+
+        if !exists {
+            return Err(FileError::NotFound(dir.get_without_slash().into()));
+        }
+
+        entries.sort_by(|a, b| a.get_with_slash().cmp(b.get_with_slash()));
+        Ok(entries)
+    }
+
     fn font(&self, index: usize) -> Option<Font> {
         self.base.fonts.get(index).cloned()
     }

@@ -32,7 +32,7 @@ pub fn read(
     #[default(Some(Encoding::Utf8))]
     encoding: Option<Encoding>,
 ) -> SourceResult<Readable> {
-    let loaded = path.map(DataSource::Path).load(engine.world)?;
+    let loaded = path.map(DataSource::FilePath).load(engine.world)?;
     Ok(match encoding {
         None => Readable::Bytes(loaded.data),
         Some(Encoding::Utf8) => Readable::Str(loaded.data.to_str().within(&loaded)?),

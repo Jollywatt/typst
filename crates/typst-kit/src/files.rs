@@ -343,11 +343,39 @@ impl FsRoot {
             fs::read(&path).map(Bytes::new).map_err(f)
         }
     }
+
+    /// Reads the entries of a directory in this root.
+    pub fn read_dir(&self, path: &VirtualPath) -> FileResult<Vec<VirtualPath>> {
+        let resolved = self.resolve(path);
+        let f = |e| FileError::from_io(e, &resolved);
+        let metadata = fs::metadata(&resolved).map_err(f)?;
+        if !metadata.is_dir() {
+            return Err(FileError::Other(Some("not a directory".into())));
+        }
+
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(&resolved).map_err(f)? {
+            let entry = entry.map_err(f)?;
+            let name = entry.file_name().into_string().map_err(|_| {
+                FileError::Other(Some("directory entry name is not valid UTF-8".into()))
+            })?;
+            let vpath = path.join(name.as_str()).map_err(|_| {
+                FileError::Other(Some("directory entry name is invalid".into()))
+            })?;
+            entries.push(vpath);
+        }
+
+        entries.sort_by(|a, b| a.get_with_slash().cmp(b.get_with_slash()));
+        Ok(entries)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use typst_syntax::{RootedPath, VirtualRoot};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use typst_syntax::{RootedPath, VirtualPath, VirtualRoot};
 
     use super::*;
 
@@ -408,6 +436,26 @@ mod tests {
     const B_TEXT: &str = "Hello from B";
     const C_DATA: &[u8] = b"a\xFF\xFF\xFFb";
     const E_TEXT: &str = "A secret";
+
+    #[test]
+    fn test_fs_root_read_dir() {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root_dir = std::env::temp_dir()
+            .join(format!("typst-readdir-{unique}-{}", std::process::id()));
+        fs::create_dir_all(root_dir.join("sub")).unwrap();
+        fs::write(root_dir.join("a.txt"), "a").unwrap();
+        fs::write(root_dir.join("b.typ"), "b").unwrap();
+
+        let root = FsRoot::new(root_dir.clone());
+        let entries = root.read_dir(&VirtualPath::new("").unwrap()).unwrap();
+        let names: Vec<_> = entries
+            .iter()
+            .map(|path| path.get_without_slash().to_string())
+            .collect();
+        assert_eq!(names, ["a.txt", "b.typ", "sub"]);
+
+        fs::remove_dir_all(root_dir).unwrap();
+    }
 
     struct TestLoader(usize);
 

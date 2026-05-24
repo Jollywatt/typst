@@ -74,6 +74,10 @@ impl World for TestWorld {
         }
     }
 
+    fn dir(&self, id: FileId) -> FileResult<Vec<VirtualPath>> {
+        Err(FileError::NotFound(id.vpath().get_without_slash().into()))
+    }
+
     fn font(&self, index: usize) -> Option<Font> {
         self.base.fonts.get(index).cloned()
     }

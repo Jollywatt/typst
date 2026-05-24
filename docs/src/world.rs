@@ -107,6 +107,10 @@ impl World for DocWorld {
         self.files.file(id)
     }
 
+    fn dir(&self, id: FileId) -> FileResult<Vec<VirtualPath>> {
+        self.files.loader().read_dir(id)
+    }
+
     fn font(&self, index: usize) -> Option<Font> {
         FONTS.1.get(index).cloned()
     }
@@ -161,6 +165,10 @@ impl DocsFiles {
 
     fn resolve(&self, id: FileId) -> FileResult<PathBuf> {
         Ok(self.root(id)?.resolve(id.vpath()))
+    }
+
+    fn read_dir(&self, id: FileId) -> FileResult<Vec<VirtualPath>> {
+        self.root(id)?.read_dir(id.vpath())
     }
 
     fn root(&self, id: FileId) -> FileResult<FsRoot> {

@@ -4,6 +4,7 @@ use typst::syntax::{FileId, Source};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
 use typst::{Library, LibraryExt, World};
+use typst_syntax::VirtualPath;
 
 pub struct FuzzWorld {
     library: LazyHash<Library>,
@@ -48,6 +49,10 @@ impl World for FuzzWorld {
     }
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
+        Err(FileError::NotFound(id.vpath().get_without_slash().into()))
+    }
+
+    fn dir(&self, id: FileId) -> FileResult<Vec<VirtualPath>> {
         Err(FileError::NotFound(id.vpath().get_without_slash().into()))
     }
 

@@ -1,8 +1,9 @@
+use std::collections::HashSet;
 use std::error;
 use std::fmt;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
 
 use ecow::{EcoString, eco_format};
 use typst::diag::{FileError, FileResult};
@@ -31,6 +32,8 @@ pub struct SystemWorld {
     fonts: LazyLock<FontStore, Box<dyn Fn() -> FontStore + Send + Sync>>,
     /// Maps file ids to source files and buffers.
     files: FileStore<SystemFiles>,
+    /// Directories accessed during the last compilation.
+    dir_deps: Mutex<HashSet<FileId>>,
     /// The current datetime if requested. This is stored here to ensure it is
     /// always the same within one compilation.
     /// Reset between compilations if not [`Time::Fixed`].
@@ -80,6 +83,7 @@ impl SystemWorld {
                 crate::fonts::discover_fonts(&world_args.font)
             })),
             files: FileStore::new(SystemFiles::new(input, world_args)?),
+            dir_deps: Mutex::new(HashSet::new()),
             now,
         })
     }
@@ -97,12 +101,20 @@ impl SystemWorld {
     /// Return all paths the last compilation depended on.
     pub fn dependencies(&mut self) -> impl Iterator<Item = PathBuf> + '_ {
         let (loader, deps) = self.files.dependencies();
-        deps.filter_map(|id| loader.resolve(id).ok())
+        let dir_paths = self
+            .dir_deps
+            .lock()
+            .expect("dir dependency lock poisoned")
+            .iter()
+            .filter_map(|id| loader.resolve(*id).ok())
+            .collect::<Vec<_>>();
+        deps.filter_map(|id| loader.resolve(id).ok()).chain(dir_paths)
     }
 
     /// Reset the compilation state in preparation of a new compilation.
     pub fn reset(&mut self) {
         self.files.reset();
+        self.dir_deps.lock().expect("dir dependency lock poisoned").clear();
         self.now.reset();
     }
 
@@ -133,6 +145,11 @@ impl World for SystemWorld {
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
         self.files.file(id)
+    }
+
+    fn dir(&self, id: FileId) -> FileResult<Vec<VirtualPath>> {
+        self.dir_deps.lock().expect("dir dependency lock poisoned").insert(id);
+        self.files.loader().read_dir(id)
     }
 
     fn font(&self, index: usize) -> Option<Font> {
@@ -244,6 +261,11 @@ impl SystemFiles {
     /// Resolves the file system path for the given `id`.
     pub fn resolve(&self, id: FileId) -> FileResult<PathBuf> {
         Ok(self.root(id)?.resolve(id.vpath()))
+    }
+
+    /// Reads the entries of the directory identified by `id`.
+    pub fn read_dir(&self, id: FileId) -> FileResult<Vec<VirtualPath>> {
+        self.root(id)?.read_dir(id.vpath())
     }
 
     /// Resolves the root in which the given file ID resides.
