@@ -28,11 +28,12 @@ pub mod visualize;
 
 use std::ops::{Deref, Range};
 
+use ecow::EcoString;
 use serde::{Deserialize, Serialize};
-use typst_syntax::{DiagSpan, DiagSpanKind, FileId, Source};
+use typst_syntax::{DiagSpan, DiagSpanKind, FileId, Source, VirtualPath};
 use typst_utils::{LazyHash, SmallBitSet};
 
-use crate::diag::FileResult;
+use crate::diag::{FileError, FileResult};
 use crate::foundations::{
     Array, Binding, Bytes, Datetime, Dict, Duration, Module, NativeRuleMap, Scope, Styles,
 };
@@ -95,6 +96,22 @@ pub trait World: Send + Sync {
     /// If this function returns `None`, Typst's `datetime` function will
     /// return an error.
     fn today(&self, offset: Option<Duration>) -> Option<Datetime>;
+
+    /// Enumerate all project paths that match the given glob pattern.
+    ///
+    /// The `pattern` is resolved relative to the calling file identified by
+    /// `within`. Absolute patterns (starting with `/`) are resolved relative
+    /// to the project root; relative patterns are resolved relative to the
+    /// calling file's directory.
+    ///
+    /// Returns a sorted list of matching virtual paths. Returns an error if
+    /// glob enumeration is not supported by this world.
+    fn glob(&self, pattern: EcoString, within: FileId) -> FileResult<Vec<VirtualPath>> {
+        let _ = (pattern, within);
+        Err(FileError::Other(Some(
+            "glob is not supported in this environment".into(),
+        )))
+    }
 }
 
 macro_rules! world_impl {
@@ -126,6 +143,14 @@ macro_rules! world_impl {
 
             fn today(&self, offset: Option<Duration>) -> Option<Datetime> {
                 self.deref().today(offset)
+            }
+
+            fn glob(
+                &self,
+                pattern: EcoString,
+                within: FileId,
+            ) -> FileResult<Vec<VirtualPath>> {
+                self.deref().glob(pattern, within)
             }
         }
     };

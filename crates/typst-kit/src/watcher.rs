@@ -30,6 +30,11 @@ pub struct Watcher {
     /// A set of files that should be watched, but don't exist. We manually poll
     /// for those.
     missing: FxHashSet<PathBuf>,
+    /// Directories to watch for glob patterns. The bool value tracks whether
+    /// the directory is still active (for mark-and-sweep cleanup), combined
+    /// with whether recursive watching is needed.
+    /// Value: (recursive, seen_this_update)
+    watched_dirs: FxHashMap<PathBuf, (bool, bool)>,
 }
 
 impl Watcher {
@@ -66,6 +71,7 @@ impl Watcher {
             watcher,
             watched: FxHashMap::default(),
             missing: FxHashSet::default(),
+            watched_dirs: FxHashMap::default(),
         })
     }
 
@@ -112,6 +118,61 @@ impl Watcher {
                 self.watcher.unwatch(path).ok();
             }
             seen
+        });
+
+        Ok(())
+    }
+
+    /// Update the set of directories watched for glob patterns.
+    ///
+    /// Directories that are newly added will be watched. Directories no longer
+    /// needed will be unwatched. Non-existent directories are skipped silently.
+    pub fn update_dirs(
+        &mut self,
+        dirs: impl IntoIterator<Item = (PathBuf, bool)>,
+    ) -> StrResult<()> {
+        // Mark all as not seen so we can sweep stale entries.
+        #[allow(clippy::iter_over_hash_type, reason = "order does not matter")]
+        for (_, seen) in self.watched_dirs.values_mut() {
+            *seen = false;
+        }
+
+        for (dir, recursive) in dirs {
+            // Skip directories that don't exist yet.
+            if !dir.exists() {
+                continue;
+            }
+
+            let mode = if recursive {
+                RecursiveMode::Recursive
+            } else {
+                RecursiveMode::NonRecursive
+            };
+
+            if let Some((prev_recursive, seen)) = self.watched_dirs.get_mut(&dir) {
+                // Already watched. If recursion mode changed, re-watch it.
+                if *prev_recursive != recursive {
+                    self.watcher.unwatch(&dir).ok();
+                    self.watcher
+                        .watch(&dir, mode)
+                        .map_err(|err| eco_format!("failed to watch {dir:?} ({err})"))?;
+                    *prev_recursive = recursive;
+                }
+                *seen = true;
+            } else {
+                self.watcher
+                    .watch(&dir, mode)
+                    .map_err(|err| eco_format!("failed to watch {dir:?} ({err})"))?;
+                self.watched_dirs.insert(dir, (recursive, true));
+            }
+        }
+
+        // Unwatch directories no longer needed.
+        self.watched_dirs.retain(|dir, (_, seen)| {
+            if !*seen {
+                self.watcher.unwatch(dir).ok();
+            }
+            *seen
         });
 
         Ok(())

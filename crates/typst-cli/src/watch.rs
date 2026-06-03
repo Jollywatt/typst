@@ -69,6 +69,10 @@ pub fn watch(command: &'static WatchCommand) -> HintedStrResult<()> {
         // Watch all dependencies of the most recent compilation.
         watcher.update(world.dependencies())?;
 
+        // Also watch directories for glob patterns so that newly created files
+        // that match a pattern trigger a recompile.
+        watcher.update_dirs(world.glob_watch_dirs())?;
+
         // Wait until anything relevant happens.
         watcher.wait()?;
 
