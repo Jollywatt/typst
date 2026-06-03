@@ -35,6 +35,9 @@ pub struct SystemWorld {
     /// always the same within one compilation.
     /// Reset between compilations if not [`Time::Fixed`].
     now: Time,
+    /// Base directories and recursion flags for glob patterns used during
+    /// the last compilation. Cleared in `reset()`.
+    glob_watch_dirs: std::sync::Mutex<Vec<(PathBuf, bool)>>,
 }
 
 impl SystemWorld {
@@ -81,6 +84,7 @@ impl SystemWorld {
             })),
             files: FileStore::new(SystemFiles::new(input, world_args)?),
             now,
+            glob_watch_dirs: std::sync::Mutex::new(Vec::new()),
         })
     }
 
@@ -104,6 +108,19 @@ impl SystemWorld {
     pub fn reset(&mut self) {
         self.files.reset();
         self.now.reset();
+        if let Ok(mut dirs) = self.glob_watch_dirs.lock() {
+            dirs.clear();
+        }
+    }
+
+    /// Returns the base directories and recursion flags for all glob patterns
+    /// called during the last compilation. Used by the file watcher to detect
+    /// newly created files that match those patterns.
+    pub fn glob_watch_dirs(&self) -> Vec<(PathBuf, bool)> {
+        self.glob_watch_dirs
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default()
     }
 
     /// Forcibly scan fonts instead of doing it lazily upon the first access.
@@ -166,6 +183,20 @@ impl World for SystemWorld {
             };
             base.join(pattern.as_str())
         };
+
+        // Lexically normalise `..` components so that patterns like
+        // `../sibling/*.typ` survive the join without confusing the glob crate,
+        // which does not resolve `..` on its own.
+        let fs_pattern = lexical_normalize(fs_pattern);
+
+        // Record the directory to watch for this glob pattern so that the file
+        // watcher can detect newly created files that match it.
+        let (watch_dir, recursive) = glob_watch_dir(&fs_pattern);
+        if let Ok(mut dirs) = self.glob_watch_dirs.lock() {
+            if !dirs.iter().any(|(d, r)| d == &watch_dir && *r == recursive) {
+                dirs.push((watch_dir, recursive));
+            }
+        }
 
         let pattern_str = fs_pattern
             .to_str()
@@ -311,6 +342,41 @@ impl FileLoader for SystemFiles {
             self.root(id)?.load(id.vpath())
         }
     }
+}
+
+/// Lexically resolves `..` components in a path without touching the
+/// filesystem. Glob wildcards (`*`, `**`, `?`) are preserved as-is.
+fn lexical_normalize(path: PathBuf) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => { out.pop(); }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Given a fully resolved filesystem glob pattern, returns the deepest
+/// directory prefix that contains no wildcard characters, and whether the
+/// pattern requires recursive directory watching (i.e., contains `**`).
+fn glob_watch_dir(fs_pattern: &Path) -> (PathBuf, bool) {
+    let is_recursive = fs_pattern
+        .to_str()
+        .is_some_and(|s| s.contains("**"));
+
+    // Collect path components until we hit one that contains a wildcard.
+    let base: PathBuf = fs_pattern
+        .components()
+        .take_while(|c| {
+            c.as_os_str()
+                .to_str()
+                .is_none_or(|s| !s.contains(['*', '?', '[']))
+        })
+        .collect();
+
+    (base, is_recursive)
 }
 
 /// Read from stdin.

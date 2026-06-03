@@ -1,4 +1,4 @@
-use typst_syntax::Spanned;
+use typst_syntax::{Spanned, VirtualPath};
 
 use crate::World;
 use crate::diag::{At, SourceResult};
@@ -17,27 +17,26 @@ use crate::foundations::{Array, Str, Value, func};
 /// - Otherwise, the pattern resolves relative to the directory of the calling
 ///   file.
 ///
-/// The returned paths are absolute (starting with `/`) and can be passed
-/// directly to functions like @read, @image, @csv, or similar.
+/// By default the returned paths are *relative* to the directory of the calling
+/// file, so they can be passed directly to functions like @read, @image, or
+/// @include from the same location. Pass `{absolute: true}` to get
+/// project-root-relative paths instead (starting with `/`).
 ///
 /// This function is only available when compiling with the CLI; it is not
 /// supported in environments without direct filesystem access.
 ///
 /// = Example <example>
-/// Load and include all chapters from a subdirectory:
+/// Load and include all chapters from a subdirectory (relative paths):
 /// ```typ
 /// #for chapter in glob("chapters/*.typ") {
 ///   include chapter
 /// }
 /// ```
 ///
-/// Collect all PNG images under the project root:
+/// Collect all PNG images, passing them to a function in another file where
+/// absolute paths are needed:
 /// ```typ
-/// #let images = glob("/assets/**/*.png")
-/// #grid(
-///   columns: 3,
-///   ..images.map(image),
-/// )
+/// #let images = glob("/assets/**/*.png", absolute: true)
 /// ```
 #[func]
 pub fn glob(
@@ -48,17 +47,35 @@ pub fn glob(
     /// Otherwise, the pattern is resolved relative to the directory of the
     /// calling file.
     pattern: Spanned<Str>,
+    /// Whether to return absolute paths (relative to the project root,
+    /// starting with `/`) instead of paths relative to the calling file's
+    /// directory.
+    ///
+    /// Defaults to `{false}`.
+    #[named]
+    #[default(false)]
+    absolute: bool,
 ) -> SourceResult<Array> {
     let span = pattern.span;
     let within = span.id().ok_or("cannot access file system from here").at(span)?;
 
-    let paths = engine
-        .world
-        .glob(pattern.v.into(), within)
-        .at(span)?;
+    let paths = engine.world.glob(pattern.v.into(), within).at(span)?;
+
+    // Caller's directory — parent of the calling file's virtual path.
+    let caller_dir: VirtualPath = within
+        .vpath()
+        .parent()
+        .unwrap_or_else(|| within.vpath().clone());
 
     Ok(paths
         .into_iter()
-        .map(|vpath| Value::Str(vpath.get_with_slash().into()))
+        .map(|vpath| {
+            let s: Str = if absolute {
+                vpath.get_with_slash().into()
+            } else {
+                vpath.relative_from(&caller_dir).as_str().into()
+            };
+            Value::Str(s)
+        })
         .collect())
 }
