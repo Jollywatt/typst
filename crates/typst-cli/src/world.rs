@@ -142,6 +142,52 @@ impl World for SystemWorld {
     fn today(&self, offset: Option<Duration>) -> Option<Datetime> {
         self.now.today(offset)
     }
+
+    fn glob(&self, pattern: EcoString, within: FileId) -> FileResult<Vec<VirtualPath>> {
+        // Glob is only supported for project files.
+        if !matches!(within.root(), VirtualRoot::Project) {
+            return Err(FileError::Other(Some(
+                "glob is not supported for package files".into(),
+            )));
+        }
+
+        let root = self.files.loader().project.path();
+
+        // Resolve the pattern base: absolute patterns (starting with `/`) are
+        // relative to the project root; relative patterns are relative to the
+        // calling file's directory.
+        let fs_pattern = if pattern.starts_with('/') {
+            let trimmed = pattern.trim_start_matches('/');
+            root.join(trimmed)
+        } else {
+            let base = match within.vpath().parent() {
+                Some(parent) => parent.realize(root),
+                None => root.to_path_buf(),
+            };
+            base.join(pattern.as_str())
+        };
+
+        let pattern_str = fs_pattern
+            .to_str()
+            .ok_or_else(|| FileError::Other(Some("pattern is not valid UTF-8".into())))?;
+
+        let mut paths = Vec::new();
+        for entry in glob::glob(pattern_str)
+            .map_err(|e| FileError::Other(Some(e.msg.into())))?
+        {
+            match entry {
+                Ok(path) if path.is_file() => {
+                    if let Ok(vpath) = VirtualPath::virtualize(root, &path) {
+                        paths.push(vpath);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        paths.sort_by(|a, b| a.get_with_slash().cmp(b.get_with_slash()));
+        Ok(paths)
+    }
 }
 
 impl DiagnosticWorld for SystemWorld {
