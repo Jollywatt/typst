@@ -17,12 +17,20 @@ use crate::{
 pub struct HtmlOptions {
     /// Whether to format the HTML in a human-readable way.
     pub pretty: bool,
+    /// Whether to rewrite `/index.html` suffixes in link `href` attributes to
+    /// `/`, producing cleaner URLs for servers that serve `index.html` for
+    /// directory paths (e.g. `abc/index.html` becomes `abc/`).
+    ///
+    /// A fragment, if present, is preserved: `abc/index.html#section` becomes
+    /// `abc/#section`. The transformation is not applied to hrefs that do not
+    /// end with `/index.html` (optionally followed by a `#fragment`).
+    pub tidy_index_links: bool,
 }
 
 /// Encodes an HTML document into a string.
 pub fn html(document: &HtmlDocument, options: &HtmlOptions) -> SourceResult<String> {
     let link_resolver = LateLinkResolver::new(None, document.introspector().as_ref());
-    let w = Writer::new(link_resolver.track(), options.pretty);
+    let w = Writer::new(link_resolver.track(), options);
     html_impl(w, document.root())
 }
 
@@ -35,7 +43,7 @@ pub fn html_in_bundle(
     options: &HtmlOptions,
     link_resolver: Tracked<LateLinkResolver>,
 ) -> SourceResult<String> {
-    let w = Writer::new(link_resolver, options.pretty);
+    let w = Writer::new(link_resolver, options);
     html_impl(w, root)
 }
 
@@ -61,17 +69,43 @@ struct Writer<'a> {
     link_resolver: Tracked<'a, LateLinkResolver<'a>>,
     /// Whether pretty printing is enabled.
     pretty: bool,
+    /// Whether to rewrite `/index.html` suffixes in href attributes to `/`.
+    tidy_index_links: bool,
 }
 
 impl<'a> Writer<'a> {
     /// Creates a new writer.
-    fn new(link_resolver: Tracked<'a, LateLinkResolver<'a>>, pretty: bool) -> Self {
+    fn new(link_resolver: Tracked<'a, LateLinkResolver<'a>>, options: &HtmlOptions) -> Self {
         Self {
             buf: String::new(),
             level: 0,
             link_resolver,
-            pretty,
+            pretty: options.pretty,
+            tidy_index_links: options.tidy_index_links,
         }
+    }
+}
+
+/// Rewrites an `href` attribute value so that a `/index.html` suffix (before
+/// any `#fragment`) is replaced with just `/`.
+///
+/// Examples:
+/// - `abc/index.html`         → `abc/`
+/// - `abc/index.html#section` → `abc/#section`
+/// - `index.html`             → unchanged (no leading `/`)
+/// - `https://example.com/index.html` → unchanged (no leading `/`)
+fn tidy_index_href(value: &EcoString) -> EcoString {
+    // Split off any `#fragment` so we can inspect the path alone.
+    let (path, fragment) = match value.find('#') {
+        Some(i) => (&value[..i], &value[i..]),
+        None => (value.as_str(), ""),
+    };
+    if path.ends_with("/index.html") {
+        // Strip "index.html", leaving the trailing "/".
+        let tidied_path = &path[..path.len() - "index.html".len()];
+        eco_format!("{tidied_path}{fragment}")
+    } else {
+        value.clone()
     }
 }
 
@@ -122,6 +156,16 @@ fn write_element(w: &mut Writer, element: &HtmlElement) -> SourceResult<()> {
         if !value.is_empty() {
             w.buf.push('=');
             w.buf.push('"');
+            let tidied;
+            let value = if w.tidy_index_links
+                && element.tag == tag::a
+                && *attr == attr::href
+            {
+                tidied = tidy_index_href(value);
+                &tidied
+            } else {
+                value
+            };
             for c in value.chars() {
                 if charsets::is_valid_in_attribute_value(c) {
                     w.buf.push(c);

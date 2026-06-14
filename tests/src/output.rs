@@ -454,7 +454,7 @@ impl OutputType for Html {
     }
 
     fn make_live(_: &Test, doc: &Self::Doc) -> SourceResult<Self::Live> {
-        let options = HtmlOptions { pretty: true };
+        let options = HtmlOptions { pretty: true, tidy_index_links: false };
         typst_html::html(doc, &options)
     }
 
@@ -494,7 +494,7 @@ impl OutputType for Bundle {
     fn make_live(test: &Test, doc: &Self::Doc) -> SourceResult<Self::Live> {
         let standards = test.attrs.pdf_standard.as_slice();
         let options = BundleOptions {
-            html: HtmlOptions { pretty: true },
+            html: HtmlOptions { pretty: true, tidy_index_links: false },
             pdf: pdf_options(standards)?,
             png: RenderOptions {
                 pixel_per_pt: Scalar::new(1.0),

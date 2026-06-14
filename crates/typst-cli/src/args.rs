@@ -327,6 +327,12 @@ pub struct CompileArgs {
     #[arg(long = "pretty")]
     pub pretty: bool,
 
+    /// Whether to tidy index links in HTML output.
+    ///
+    /// When enabled, links ending in "/index.html" are shortened to end with "/".
+    #[arg(long = "pretty-links")]
+    pub pretty_links: bool,
+
     /// Which pages to export. When unspecified, all pages are exported.
     ///
     /// Pages to export are separated by commas, and can be either simple page

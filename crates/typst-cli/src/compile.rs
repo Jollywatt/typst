@@ -60,6 +60,8 @@ pub struct CompileConfig {
     pub output_format: OutputFormat,
     /// Whether to make the serialized document pretty.
     pub pretty: bool,
+    /// Whether to tidy index links in HTML output.
+    pub pretty_links: bool,
     /// Which pages to export.
     pub pages: Option<PageRanges>,
     /// The document's creation date formatted as a UNIX timestamp, with UTC suffix.
@@ -227,6 +229,7 @@ impl CompileConfig {
             output,
             output_format,
             pretty: args.pretty,
+            pretty_links: args.pretty_links,
             pages,
             pdf_standards,
             tagged,
@@ -341,7 +344,7 @@ fn compile_and_export(
 
 /// Export to HTML.
 fn export_html(document: &HtmlDocument, config: &CompileConfig) -> SourceResult<()> {
-    let options = HtmlOptions { pretty: config.pretty };
+    let options = HtmlOptions { pretty: config.pretty, tidy_index_links: config.pretty_links };
     let html = typst_html::html(document, &options)?;
     let result = config.output.write(html.as_bytes());
 
@@ -590,7 +593,7 @@ fn export_image_page(
 
 /// Creates options for HTML export.
 fn html_options(config: &CompileConfig) -> HtmlOptions {
-    HtmlOptions { pretty: config.pretty }
+    HtmlOptions { pretty: config.pretty, tidy_index_links: true }
 }
 
 /// Creates options for PDF export.
